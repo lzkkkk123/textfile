@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Heartfelt Immersive Editor</title>
+    <style>
+        /* --- 基础重置 --- */
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Helvetica Neue', sans-serif;
+        }
+
+        /* --- 画布容器 --- */
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* --- UI 图标与面板 --- */
+        .ui-layer {
+            position: absolute;
+            z-index: 10;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            /* 让鼠标穿透到 WebGL */
+        }
+
+        /* 悬浮设置按钮 */
+        .fab-btn {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            cursor: pointer;
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .fab-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
+        }
+
+        .fab-btn svg {
+            width: 24px;
+            height: 24px;
+            fill: white;
+        }
+
+        /* 控制面板 (Glassmorphism) */
+        .control-panel {
+            position: absolute;
+            bottom: 90px;
+            right: 30px;
+            width: 280px;
+            padding: 25px;
+            background: rgba(20, 20, 20, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            pointer-events: auto;
+            opacity: 0;
+            transform: translateY(20px) scale(0.95);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            visibility: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            color: #fff;
+        }
+
+        .control-panel.active {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            visibility: visible;
+        }
+
+        /* 控件样式 */
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            opacity: 0.7;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 14px;
+            width: 14px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        input[type="range"]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 2px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 1px;
+        }
+
+        /* 上传按钮 */
+        .upload-btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin-top: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            text-align: center;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+
+        .upload-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        /* Loading */
+        #loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="canvas-container"></div>
+    <div id="loader">INITIALIZING FLUID DYNAMICS...</div>
+
+    <div class="ui-layer">
+        <!-- 设置按钮 -->
+        <div class="fab-btn" id="toggle-btn">
+            <svg viewBox="0 0 24 24">
+                <path
+                    d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.06-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.49l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.06,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z" />
+            </svg>
+        </div>
+
+        <!-- 操作面板 -->
+        <div class="control-panel" id="panel">
+            <div class="control-group">
+                <div class="label"><span>Rain Intensity</span> <span id="val-rain">1.0</span></div>
+                <input type="range" id="input-rain" min="0" max="2" step="0.01" value="1.0">
+            </div>
+            <div class="control-group">
+                <div class="label"><span>Mist / Blur</span> <span id="val-blur">1.0</span></div>
+                <input type="range" id="input-blur" min="0" max="3" step="0.01" value="1.0">
+            </div>
+            <div class="control-group">
+                <div class="label"><span>Refraction</span> <span id="val-ref">0.5</span></div>
+                <input type="range" id="input-ref" min="0" max="1" step="0.01" value="0.5">
+            </div>
+
+            <label class="upload-btn">
+                Replace Background (Img/Vid)
+                <input type="file" id="file-input" accept="image/*,video/*">
+            </label>
+        </div>
+    </div>
+
+    <!-- 引入 Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- 全局变量与初始化 ---
+        let scene, camera, renderer, uniforms;
+        let videoElement = null;
+        let texture = null;
+
+        const container = document.getElementById('canvas-container');
+        const loader = document.getElementById('loader');
+
+        // --- GLSL SHADER (核心部分：Heartfelt 算法移植) ---
+        // 来源参考：BigWings "Heartfelt" on Shadertoy. 
+        // 进行了适配以支持 Uniform 调节和自定义背景。
+
+        const vertexShader = `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = vec4(position, 1.0);
+            }
+        `;
+
+        const fragmentShader = `
+            uniform float iTime;
+            uniform vec2 iResolution;
+            uniform sampler2D iChannel0; // 背景纹理
+            uniform bool uUseTexture;    // 是否使用上传的纹理
+            uniform float uRainIntensity;
+            uniform float uRainBlur;     // 雾气/模糊程度
+            uniform float uRefraction;   // 折射率
+
+            varying vec2 vUv;
+
+            // --- 随机函数 ---
+            vec3 N13(float p) {
+                vec3 p3 = fract(vec3(p) * vec3(.1031, .11369, .13787));
+                p3 += dot(p3, p3.yzx + 19.19);
+                return fract(vec3((p3.x + p3.y) * p3.z, (p3.x+p3.z) * p3.y, (p3.y+p3.z) * p3.x));
+            }
+
+            vec4 N14(float t) {
+                return fract(sin(t*vec4(123., 1024., 1456., 264.))*vec4(6547., 345., 8799., 1564.));
+            }
+            float N(float t) {
+                return fract(sin(t*12345.564)*7658.76);
+            }
+
+            // --- 锯齿波函数用于循环动画 ---
+            float Saw(float b, float t) {
+                return smoothstep(0., b, t)*smoothstep(1., b, t);
+            }
+
+            // --- 核心雨滴层逻辑 ---
+            // 返回 vec2: x=距离, y=轨迹掩码
+            vec2 DropLayer(vec2 uv, float t) {
+                vec2 UV = uv;
+                
+                // 1. 网格化
+                uv.y += t * 0.75;
+                vec2 a = vec2(6., 1.);
+                vec2 grid = a * 2.;
+                vec2 id = floor(uv * grid);
+                
+                // 2. 随机偏移列（模拟不同列的雨滴错开）
+                float colShift = N(id.x); 
+                uv.y += colShift;
+                
+                id = floor(uv * grid);
+                vec3 n = N13(id.x * 35.2 + id.y * 2376.1);
+                vec2 st = fract(uv * grid) - vec2(.5, 0); // 局部坐标
+
+                // 3. 每一格内的雨滴位置计算
+                float x = n.x - .5; // 随机水平位置
+                float y = UV.y * 20.; // 垂直拉伸
+                
+                // 主雨滴轨迹 (sin波形模拟自然摆动)
+                float wiggle = sin(y + sin(y + t) * 55.) * 0.05; 
+                x += wiggle * (0.5 - abs(x)) * (n.z - .5);
+                x *= .7;
+                
+                // 4. 雨滴形状与动力学
+                float ti = fract(t + n.z);
+                
+                // 主雨滴 (随着重力下落)
+                float mainDropY = (Saw(.85, ti) - .5) * .9;
+                vec2 p = vec2(x, mainDropY);
+                float d = length((st - p) * a.yx); // 距离场
+                
+                float mainDrop = smoothstep(.4, .0, d);
+                
+                // 停留的小水珠 (Trailing droplets)
+                float r = sqrt(smoothstep(1., y, st.y));
+                float cd = abs(st.x - x);
+                float trail = smoothstep(.23 * r, .15 * r * r, cd); // 轨迹宽度
+                float trailFront = smoothstep(-.02, .02, st.y - mainDropY);
+                trail *= trailFront * r * r;
+                
+                // 将轨迹切成小珠子
+                y = UV.y;
+                float trail2 = smoothstep(.2 * r, .0, cd);
+                float droplets = max(0., (sin(y * (1. - y) * 120.) - st.y)) * trail2 * trailFront * n.z;
+                droplets *= smoothstep(.3, .4, st.y); // 淡入
+                
+                // 5. 静态水珠 (附着在玻璃上不动的)
+                float staticDrops = length(N14(id.x * 543.21 + id.y * 33.33).xy - st) * a.x;
+                staticDrops = smoothstep(0.25, 0.0, staticDrops) * smoothstep(.9, 1., fract(id.x * .21 + id.y * .32 + t * .5)); // 随机闪烁/消失
+                
+                return vec2(mainDrop, droplets + staticDrops * n.z); 
+            }
+
+            // --- 模拟虚焦模糊 ---
+            // 由于 WebGL 单 Pass 无法做高质量高斯模糊，这里使用简单的偏移采样模拟
+            vec3 Bokeh(sampler2D tex, vec2 uv, float radius) {
+                vec3 acc = vec3(0.0);
+                float count = 0.0;
+                
+                // 简单的旋转采样核心
+                vec2 off1 = vec2(0.0);
+                vec2 off2 = vec2(1.0, 1.0) * radius;
+                vec2 off3 = vec2(-1.0, 1.0) * radius;
+                vec2 off4 = vec2(1.0, -1.0) * radius;
+                vec2 off5 = vec2(-1.0, -1.0) * radius;
+                
+                acc += texture2D(tex, uv).rgb * 4.0; // 中心权重高一点
+                acc += texture2D(tex, uv + off2).rgb;
+                acc += texture2D(tex, uv + off3).rgb;
+                acc += texture2D(tex, uv + off4).rgb;
+                acc += texture2D(tex, uv + off5).rgb;
+                
+                return acc / 8.0; 
+            }
+            
+            // --- 默认渐变背景 ---
+            vec3 getGradientBackground(vec2 uv) {
+                float t = iTime * 0.2;
+                // 流体双色渐变逻辑
+                vec3 col1 = vec3(0.1, 0.4, 0.8); // 蓝
+                vec3 col2 = vec3(0.9, 0.3, 0.4); // 粉红
+                
+                float n = sin(uv.x * 3.0 + t) + cos(uv.y * 3.0 - t);
+                float mask = smoothstep(-1.0, 1.0, n);
+                return mix(col1, col2, mask);
+            }
+
+            void main() {
+                vec2 uv = vUv;
+                // 修复宽高比拉伸
+                vec2 aspect = vec2(iResolution.x / iResolution.y, 1.0);
+                vec2 uvNorm = (uv - 0.5) * aspect + 0.5;
+                
+                float T = iTime * 0.8; // 基础时间速度
+                
+                float t = T * .2;
+                
+                // 计算雨滴效果
+                // 使用两层雨滴增加密度和视差
+                float rainAmount = uRainIntensity;
+                
+                vec2 drop1 = DropLayer(uvNorm * 1.5 + vec2(10.0, 2.5), t) * rainAmount;
+                vec2 drop2 = DropLayer(uvNorm * 3.0 + vec2(2.0, 1.0), t) * rainAmount;
+                
+                float drops = drop1.x + drop2.x; // 主雨滴 mask
+                float trails = drop1.y + drop2.y; // 轨迹 mask
+                
+                // 构造法线偏移 (Normal Distortion)
+                // 主雨滴产生的强烈折射
+                vec2 dropOffset = vec2(0.0);
+                dropOffset += (vec2(drop1.x, drop1.x) * 0.5); 
+                
+                // 轨迹产生的轻微折射
+                dropOffset += trails * 0.2;
+                
+                // 法线修正，让水珠看起来有体积
+                vec2 normal = vec2(dFdx(drops + trails), dFdy(drops + trails));
+                // 如果不支持 fwidth/dFdx (某些移动端), 可以忽略或者用简单偏移
+                
+                float focus = (drops + trails); // 这里的 focus 代表哪里是"湿"的
+                
+                // --- 最终折射坐标 ---
+                // uRefraction 控制折射强度
+                vec2 distUV = uv + normal * uRefraction * 0.5;
+                
+                // --- 背景渲染 ---
+                vec3 col = vec3(0.0);
+                
+                // 模糊程度：雨水覆盖的地方清晰，背景模糊
+                // 如果 uRainBlur 很低，背景就清晰。如果很高，背景就糊。
+                // 物理逻辑：透过水珠看是清晰的（或扭曲的），透过有雾气的窗户看是模糊的
+                
+                float blurAmount = uRainBlur * 0.01; 
+                // 当 focus > 0 (有水) 时，blur 应该变小 (水珠内聚焦)
+                // 这是一个近似模拟
+                float dynamicBlur = blurAmount * (1.0 - clamp(focus * 2.0, 0.0, 1.0));
+                
+                if (uUseTexture) {
+                    if (dynamicBlur > 0.001) {
+                         col = Bokeh(iChannel0, distUV, dynamicBlur);
+                    } else {
+                         col = texture2D(iChannel0, distUV).rgb;
+                    }
+                } else {
+                    // 默认背景使用程序化渐变
+                    col = getGradientBackground(distUV);
+                    // 简单的模糊模拟用于渐变（只是混合颜色）
+                    if (dynamicBlur > 0.0) {
+                         col = mix(col, vec3(0.5), dynamicBlur * 5.0); // 简单淡化
+                    }
+                }
+
+                // 增加一点高光 (Specular)
+                col += vec3(0.8) * smoothstep(0.0, 0.1, focus) * 0.3;
+
+                // 稍微变暗一点营造氛围
+                col *= 0.9;
+
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `;
+
+        // --- Three.js 逻辑 ---
+
+        function init() {
+            scene = new THREE.Scene();
+
+            // 使用正交相机铺满屏幕
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+            renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // 初始 Uniforms
+            uniforms = {
+                iTime: { value: 0 },
+                iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                iChannel0: { value: null },
+                uUseTexture: { value: false },
+                uRainIntensity: { value: 1.0 },
+                uRainBlur: { value: 1.0 },
+                uRefraction: { value: 0.5 }
+            };
+
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            const material = new THREE.ShaderMaterial({
+                vertexShader: vertexShader,
+                fragmentShader: fragmentShader,
+                uniforms: uniforms
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            onWindowResize();
+            window.addEventListener('resize', onWindowResize, false);
+
+            animate();
+
+            // 隐藏 loader
+            setTimeout(() => { loader.style.display = 'none'; }, 1000);
+        }
+
+        function onWindowResize() {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            uniforms.iResolution.value.x = window.innerWidth;
+            uniforms.iResolution.value.y = window.innerHeight;
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            // 时间转换 ms -> s
+            uniforms.iTime.value = time * 0.001;
+
+            if (videoElement && videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                if (texture) texture.needsUpdate = true;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- UI 交互逻辑 ---
+
+        const toggleBtn = document.getElementById('toggle-btn');
+        const panel = document.getElementById('panel');
+        const fileInput = document.getElementById('file-input');
+
+        // 1. 面板开关
+        toggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            panel.classList.toggle('active');
+        });
+
+        // 点击画布关闭面板
+        document.addEventListener('click', (e) => {
+            if (!panel.contains(e.target) && !toggleBtn.contains(e.target)) {
+                panel.classList.remove('active');
+            }
+        });
+
+        // 2. 参数调节
+        document.getElementById('input-rain').addEventListener('input', (e) => {
+            uniforms.uRainIntensity.value = parseFloat(e.target.value);
+            document.getElementById('val-rain').innerText = e.target.value;
+        });
+
+        document.getElementById('input-blur').addEventListener('input', (e) => {
+            uniforms.uRainBlur.value = parseFloat(e.target.value);
+            document.getElementById('val-blur').innerText = e.target.value;
+        });
+
+        document.getElementById('input-ref').addEventListener('input', (e) => {
+            uniforms.uRefraction.value = parseFloat(e.target.value);
+            document.getElementById('val-ref').innerText = e.target.value;
+        });
+
+        // 3. 文件上传处理 (图片或视频)
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const url = URL.createObjectURL(file);
+            const type = file.type.split('/')[0];
+
+            // 清理旧资源
+            if (videoElement) {
+                videoElement.pause();
+                videoElement.src = "";
+                videoElement = null;
+            }
+            if (texture) {
+                texture.dispose();
+            }
+
+            if (type === 'image') {
+                new THREE.TextureLoader().load(url, (tex) => {
+                    tex.minFilter = THREE.LinearFilter;
+                    tex.magFilter = THREE.LinearFilter;
+                    updateTexture(tex);
+                });
+            } else if (type === 'video') {
+                videoElement = document.createElement('video');
+                videoElement.src = url;
+                videoElement.loop = true;
+                videoElement.muted = true;
+                videoElement.playsInline = true;
+                videoElement.play();
+
+                const vidTex = new THREE.VideoTexture(videoElement);
+                vidTex.minFilter = THREE.LinearFilter;
+                vidTex.magFilter = THREE.LinearFilter;
+                updateTexture(vidTex);
+            }
+        });
+
+        function updateTexture(tex) {
+            texture = tex;
+            uniforms.iChannel0.value = texture;
+            uniforms.uUseTexture.value = true;
+        }
+
+        // 启动
+        init();
+
+    </script>
+</body>
+
+</html>
